@@ -1,0 +1,423 @@
+---
+title: "Statistical Analysis of the Gapminder Dataset"
+author: "Ryan Jackson"
+date: "21/10/2021"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+    number_sections: yes
+fig_caption: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, echo = FALSE, eval = TRUE, warning = FALSE, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(moderndive)
+library(gapminder)
+library(skimr)
+library(kableExtra)
+library(gridExtra)
+library(MASS)
+library(qwraps2)
+```
+
+```{r data, echo = FALSE, eval = TRUE, warning = FALSE, message = FALSE}
+
+Gapdata <- read.csv("GapminderData.csv", header = TRUE)
+
+Gapdata <- Gapdata[Gapdata$Year == "1952" | Gapdata$Year == "1982" | Gapdata$Year == "2007",]
+
+
+Gap2 <- Gapdata
+
+```
+
+
+# Introduction {#sec:intro}
+
+As would be expected, the average life expectancy of humans around the world can vary wildly depending on where they are situated. For example, some continents are much more developed than others and as such have greater access to higher quality medicines and medical facilities meaning things such as infections & diseases may have a harder time spreading leading to a potentially higher life expectancy. For this analysis, we examine a subset of the Gapminder dataset which is readily available through the gapminder library in R and it contains data on Life Expectancy, Population and GDP per Capita for each country from 1952-2007 in 5 year intervals however for this analysis, we examine the years 1952, 1982 & 2007. The aim for our analysis is to assess how the life expectancy for each continent changes over time and what effect population, GDP per Capita and time may have had on the life expectancy.
+Section \ref{sec:eda} explores the data in detail with some visualisations followed by Section \ref{sec:fda} which contains the statistical model and our assumptions, lastly Section \ref{sec:conc} has our concluding remarks on the data and our model. 
+
+
+
+
+# Exploratory Analysis {#sec:eda}
+
+The Gapminder dataset contains 1704 rows of 6 variables namely, Country, Continent, Year, Life Expectancy, Population and GDP/Cap. After taking our subset of the years 1952, 1982 and 2007 we have 426 rows left over.
+
+## Data Cleaning 
+
+One of the first steps in our analysis is to esure that we take care of any missing values in our data should they exist. Table \ref{tab:MissVals} below shows the count of the missing values in each column of our dataset and as we can see there are no missing values to deal with.
+
+
+```{r missingvals, echo = FALSE, eval = TRUE, warning = FALSE, message = FALSE}
+
+#------------------------ Missing Values ------------------------
+
+
+missing <- rbind(sapply(Gapdata, function(x) sum(is.na(x))))
+row.names(missing) <- "No. of Missing Values"
+
+kable(missing, format = "latex", booktabs = TRUE, caption = '\\label{tab:MissVals} Count of Missing Values for each Variable.') %>%
+  kable_styling(latex_options = "hold_position", font_size = 11)
+
+
+```
+
+
+Before moving onto the visualisations in Section \ref{sec:viz} below, we need to make a slight adjustment to some of the values in the Continent column in the dataset as currently the values we have are Africa, Americas, Asia, Europe, Oceania but instead we'd like to split the Americas into North and South America depending on the country.
+
+
+```{r dataclean, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+
+#------------------------ Data Cleaning ------------------------
+
+
+Continents <- cbind(as.character(factor(c("Africa", "Asia", "Europe", "North America", "Oceania", "South America"))))
+
+
+Gapdata$Continent <- 
+  ifelse(Gapdata$Country == "United States" | Gapdata$Country == "Canada" | Gapdata$Country == "Mexico" | Gapdata$Country == "Haiti" | Gapdata$Country == "Jamaica" | Gapdata$Country == "Costa Rica" | Gapdata$Country == "Cuba" | Gapdata$Country == "Dominican Republic" | Gapdata$Country == "Guatemala" | Gapdata$Country == "Honduras" | Gapdata$Country == "Panama" | Gapdata$Country == "El Salvador" | Gapdata$Country == "Nicaragua" | Gapdata$Country == "Puerto Rico", Continents[4,1], Gapdata$Continent)
+
+Gapdata$Continent <- 
+  ifelse(Gapdata$Country == "Argentina" | Gapdata$Country == "Bolivia" | Gapdata$Country == "Brazil" | Gapdata$Country == "Chile" | Gapdata$Country == "Colombia" | Gapdata$Country == "Ecuador" | Gapdata$Country == "Paraguay" | Gapdata$Country == "Peru" | Gapdata$Country == "Trinidad and Tobago" | Gapdata$Country == "Uruguay" | Gapdata$Country == "Venezuela", Continents[6,1], Gapdata$Continent)
+  
+
+Gapdata$Continent <- ifelse(Gapdata$Continent == "1", "Africa", Gapdata$Continent)
+Gapdata$Continent <- ifelse(Gapdata$Continent == "3", "Asia", Gapdata$Continent)
+Gapdata$Continent <- ifelse(Gapdata$Continent == "4", "Europe", Gapdata$Continent)
+Gapdata$Continent <- ifelse(Gapdata$Continent == "5", "Oceania", Gapdata$Continent)
+
+Gapdata$Continent <- as.factor(Gapdata$Continent)
+Gapdata$Year <- as.factor(Gapdata$Year)
+
+```
+
+Table \ref{tab:FreqTabs} below shows the count of countries in each continent and demonstrates how the Americas continent has been split into North and South America.
+
+
+```{r data_freq, eval=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+
+v1 <- data.frame(table(Gap2$Continent))
+colnames(v1) <- c("Continent", "Frequency")
+
+
+v2 <- data.frame(table(Gapdata$Continent))
+colnames(v2) <- c("Continent", "Frequency")
+
+kable(list(v1, v2), format = "latex", booktabs = TRUE, caption = '\\label{tab:FreqTabs} Count of Countries in each Continent.', linesep = "") %>%
+  kable_styling(latex_options = "hold_position", font_size = 11)
+
+```
+
+## Data Visualisation {#sec:viz}
+
+Now its time to explore the data visually in greater detail and we begin by a very simple comparison of the life expectancy for each continent from 1952-2007,
+
+```{r LifeExpBoxplot, eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE, out.width="95%",  fig.cap="\\label{fig:plots1} Change in Life Expectancy in each Continent in 1952(Top Left), 1982(Top Right) and 2007(Bottom).", fig.align='center', fig.pos="H"}
+
+
+
+
+p1 <-
+  ggplot(Gapdata[Gapdata$Year == 1952,], aes(x = Continent, y = LifeExp, fill = Continent)) +
+  geom_boxplot() +
+  labs(x = "Continent", y = "Life Expectancy (years)", title = "Life Expectancy in 1952") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  scale_x_discrete(labels = c("Africa", "Asia", "Europe", "N. America", "Oceania", "S. America"))
+
+p2 <-
+  ggplot(Gapdata[Gapdata$Year == 1982,], aes(x = Continent, y = LifeExp, fill = Continent)) +
+  geom_boxplot() +
+  labs(x = "Continent", y = "Life Expectancy (years)", title = "Life Expectancy in 1982") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  scale_x_discrete(labels = c("Africa", "Asia", "Europe", "N. America", "Oceania", "S. America"))
+
+p3 <-
+  ggplot(Gapdata[Gapdata$Year == 2007,], aes(x = Continent, y = LifeExp, fill = Continent)) +
+  geom_boxplot() +
+  labs(x = "Continent", y = "Life Expectancy (years)", title = "Life Expectancy in 2007") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  scale_x_discrete(labels = c("Africa", "Asia", "Europe", "N. America", "Oceania", "S. America"))
+
+grid.arrange(p1, p2, p3, layout_matrix = matrix(c(1, 3, 2, 3), nrow = 2))
+
+
+
+```
+
+In Figure \ref{fig:plots1} we see boxplots of the life expectancy for each of the continents in the years 1952, 1982 and 2007. Looking at 1952 on the top left we see that overall Africa appears to have the lowest median life expectancy followed by Asia whereas on the opposite end of the scale we have a much greater median life expectancy for both Europe and Oceania. An interesting observation is the spread of both Asia and Oceania with Asia having a significantly large spread whereas Oceania has little to no spread at all, however a likely explanation is that Oceania only contains 2 countries - Australia and New Zealand whereas Asia contains 33 countries.
+Moving to the next plot along of 1982, we see a rise across all continents in life expectancy which would be expected due to technological advancements and advancements in medical knowledge & treatments however it does appear that Africa is lagging behind the other continents by a bigger margin compared to 1952 with Asia and North America in particular taking huge leaps. We also appear to see more outliers compared to 1952 suggesting some countries aren't keeping pace with the continents as a whole however, there doesn't appear to be any continent that is heavily skewed.
+Lastly we come to 2007 on the bottom of Figure \ref{fig:plots1} and this is really where the huge gulf in life expectancy begin to show with the middle 50% of countries in Africa lagging significantly behind the rest of the world having seen no substantial increase in life expectancy from 1982. The other continents appear to all be roughly similar to one another with Asia ever so slightly behind and Oceania ever so slightly ahead.  
+
+Next we can look to how population sizes for each of the continents has changed across time with Figure \ref{fig:plots2} below showing boxplots of the log population changes for each continent from 1952 in the top left to 2007 on the bottom
+
+```{r Pop_sizes, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, out.width="95%",  fig.cap="\\label{fig:plots2} Change in Population size in each Continent in 1952(Top Left), 1982(Top Right) and 2007(Bottom).", fig.align='center', fig.pos="H"}
+
+
+p4 <- 
+  ggplot(Gapdata[Gapdata$Year == 1952,], aes(x = Continent, y = log(Population), fill = Continent)) +
+  geom_boxplot() + 
+  labs(x = "Continent", y = "Log of Population") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  scale_x_discrete(labels = c("Africa", "Asia", "Europe", "N. America", "Oceania", "S. America"))
+
+p5 <-
+  ggplot(Gapdata[Gapdata$Year == 1982,], aes(x = Continent, y = log(Population), fill = Continent)) +
+  geom_boxplot() + 
+  labs(x = "Continent", y = "Log of Population") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  scale_x_discrete(labels = c("Africa", "Asia", "Europe", "N. America", "Oceania", "S. America"))
+  
+p6 <-
+  ggplot(Gapdata[Gapdata$Year == 2007,], aes(x = Continent, y = log(Population), fill = Continent)) +
+  geom_boxplot() + 
+  labs(x = "Continent", y = "Log of Population", title = "Log Population for each Continent in 2007") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  scale_x_discrete(labels = c("Africa", "Asia", "Europe", "N. America", "Oceania", "S. America"))
+
+grid.arrange(p4, p5, p6, layout_matrix = matrix(c(1, 3, 2, 3), nrow = 2))
+
+```
+
+From Figure \ref{fig:plots2} above we can see that in 1952, the median population of each continent appears to be roughly similar with Asia and Europe sitting slightly higher than South America and Oceania followed by Africa and then suprisingly North America. The spread doesn't appear to be too large for Europe, North & South America and Oceania however, for Africa and Asia in particular we see pretty substantial standard deviations.
+As is well documented around the world today, the Earth's population is ever increasing and we see this demonstrated in both 1982 and 2007 where in 1982 we see median increases across the board with the standard deviations in Africa and Asia appearing to decrease slightly and no real increase in that of the other continents. Similarly in 2007, we see slight rises again with the biggest median increase coming from Asia and it does appear that the spread for both Africa and Asia is still significantly greater than that of any other continent.
+
+
+The final visualisations we'll take a look at for this section are shown below in Figure \ref{fig:plots3} where we have boxplots of the log GDP per Capita of each continent from 1952-2007. We use the log of the GDP per Capita here similarly to the log of the population in Figure \ref{fig:plots2} above due to how skewed the plots are without it.
+
+```{r GDPperCap, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, out.width="95%",  fig.cap="\\label{fig:plots3} Change in GDP/Cap in each Continent in 1952(Top Left), 1982(Top Right) and 2007(Bottom).", fig.align='center', fig.pos="H"}
+
+
+p4 <- 
+  ggplot(Gapdata[Gapdata$Year == 1952,], aes(x = Continent, y = log(GDP.Cap), fill = Continent)) +
+  geom_boxplot() + 
+  labs(x = "Continent", y = "Log of GDP/Cap") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  scale_x_discrete(labels = c("Africa", "Asia", "Europe", "N. America", "Oceania", "S. America"))
+
+p5 <-
+  ggplot(Gapdata[Gapdata$Year == 1982,], aes(x = Continent, y = log(GDP.Cap), fill = Continent)) +
+  geom_boxplot() + 
+  labs(x = "Continent", y = "Log of GDP/Cap") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  scale_x_discrete(labels = c("Africa", "Asia", "Europe", "N. America", "Oceania", "S. America"))
+  
+p6 <-
+  ggplot(Gapdata[Gapdata$Year == 2007,], aes(x = Continent, y = log(GDP.Cap), fill = Continent)) +
+  geom_boxplot() + 
+  labs(x = "Continent", y = "Log of GDP/Cap", title = "Log GDP/Cap for each Continent in 2007") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  scale_x_discrete(labels = c("Africa", "Asia", "Europe", "N. America", "Oceania", "S. America"))
+
+grid.arrange(p4, p5, p6, layout_matrix = matrix(c(1, 3, 2, 3), nrow = 2))
+
+
+a <- Gapdata[Gapdata$Continent == "Asia" & Gapdata$Year == 2007,]
+
+```
+
+From looking at the year 1952 we see that the continents with the lowest median GDP per Capita appear to be Africa and Asia followed by North America and South America with Oceania being the highest followed by Europe. We also do appear to see a number of outliers from Asia and North America which is what we would expect. From the plot of 1982, we see that more variability in the data begins to appear particularly in Asia as technological advancements occur and some countries are left behind the others. We see in 1982 that Europe and Oceania appear to have the highest GDP per Capita with Asia now on par with North and South America but Africa hasn't really made any significant progress from 1952. Lastly, examining the plot in 2007, we see that again there appears to have been no real progress in GDP per Capita growth for Africa and we also see that boxplot for Asia is becoming slightly more skewed and this is likely due to countries like China beginning to rapidly expand economically. Europe and Oceania again appear to be pretty level still as are North and South America.
+
+
+
+
+# Statistical Model {#sec:fda}
+
+In this section we will fit a multiple linear regression model to the data in order to assess whether continent, population and GDP per Capita are good predictors of life expectancy in the years 1952, 1982 and 2007. We begin by considering the full model for each year which has Continent, Population and GDP per Capita as our explanatory variables.
+
+```{r datamodels, eval=TRUE, warning=FALSE,echo=FALSE, include=FALSE, message=FALSE}
+
+gapminder1952 <- Gapdata %>%
+  filter(Year == 1952) %>%
+  dplyr::select(Country, Continent, LifeExp, Population, GDP.Cap)
+
+gapminder1982 <- Gapdata %>%
+  filter(Year == 1982) %>%
+  dplyr::select(Country, Continent, LifeExp, Population, GDP.Cap)
+
+gapminder2007 <- Gapdata %>%
+  filter(Year == 2007) %>%
+  dplyr::select(Country, Continent, LifeExp, Population, GDP.Cap)
+
+
+full.model.1952 <- lm(LifeExp ~.-Country, data = gapminder1952)
+
+full.model.1982 <- lm(LifeExp ~.-Country, data = gapminder1982)
+
+full.model.2007 <- lm(LifeExp ~.-Country, data = gapminder2007)
+
+
+
+step.model.1952 <- stepAIC(full.model.1952, direction = "both", trace = FALSE)
+
+step.model.1982 <- stepAIC(full.model.1982, direction = "both", trace = FALSE)
+
+step.model.2007 <- stepAIC(full.model.2007, direction = "both", trace = FALSE)
+
+# the best optimial model for each year
+
+coeff.1952 <- round(coef(step.model.1952),3)
+AIC.1952 <- step.model.1952$anova[, 6]
+
+
+
+coeff.1982 <- round(coef(step.model.1982),3)
+AIC.1982 <- step.model.1982$anova[, 6]
+
+
+
+coeff.2007 <- round(coef(step.model.2007),3)
+AIC.2007 <- step.model.2007$anova[, 6]
+
+
+
+# Final model is one with continent, GDP.Cap-- AIC Score of 567, 514, 543 respectively
+
+
+```
+
+In order to find the optimal model for the data we use stepwise regression which tells us what variables to include in the final model. We use this procedure to compare models using the Akaike Information Criterion (AIC) with both forward selection and backwards elimination and our final model will be the one which produces the lowest AIC score. 
+
+After running the procedure, the final model for each of the years included the variables Continent and GDP per Capita as our final significant predcitors meaning our model is given by:
+
+$$
+ \begin{aligned}
+ y_{i} = \alpha + \beta_{Asia} \cdot \mathbb{I}_{\mbox{Asia}}(x) + \beta_{Eur}\cdot \mathbb{I}_{\mbox{Eur}}(x) + \beta_{N.Am}\cdot \mathbb{I}_{\mbox{N.Am}}(x) + \beta_{Ocn}\cdot \mathbb{I}_{\mbox{Ocn}}(x) + \beta_{S.Am}\cdot \mathbb{I}_{\mbox{S.Am}}(x) + \beta_{GDP/Cap} \cdot x_{1i} + \epsilon_{i}
+\end{aligned}
+$$
+
+where 
+
+  * $\alpha$ is the mean life expectancy for baseline continent Africa;
+  * $\beta_{\mbox{Continent}}$ is the difference in mean life expectancy of given continent relative to baseline continent Africa;
+  * $\beta_{GDP/Cap}$ is the term added for the GDP/Cap;
+  * $\epsilon_{i} \sim N(0, \sigma^{2})$ is the error term; and
+  * $\mathbb{I}_{\mbox{Continent}}(x)$ is an indicator function such that:
+
+$$\mathbb{I}_{\mbox{Continent}}(x)=\left\{
+                \begin{array}{ll}
+                  1 ~~~ \mbox{if country  is in continent},\\
+                  0 ~~~ \mbox{Otherwise}.\\
+                \end{array}
+              \right.$$
+
+Thus, from our model above we obtain our regression equations of:
+
+\begin{align}
+\hat{y}_{1952} &= 38.9 + 6.46 \cdot \mathbb{I}_{\mbox{Asia}}(x) + 24.47 \cdot \mathbb{I}_{\mbox{Eur}}(x) + 13 \cdot \mathbb{I}_{\mbox{N.Am}}(x) + 28.46 \cdot \mathbb{I}_{\mbox{Ocn}}(x) + 14.42 \cdot \mathbb{I}_{\mbox{S.Am}}(x)\\
+\hat{y}_{1982} &= 50.14 + 8.12 \cdot \mathbb{I}_{\mbox{Asia}}(x) + 13.52 \cdot \mathbb{I}_{\mbox{Eur}}(x) + 11.56 \cdot \mathbb{I}_{\mbox{N.Am}}(x) + 13.28 \cdot \mathbb{I}_{\mbox{Ocn}}(x) + 11.86 \cdot \mathbb{I}_{\mbox{S.Am}}(x) \\
+\hat{y}_{2007} &= 53.74 + 12.67 \cdot \mathbb{I}_{\mbox{Asia}}(x) + 15.23 \cdot \mathbb{I}_{\mbox{Eur}}(x) + 16.14 \cdot \mathbb{I}_{\mbox{N.Am}}(x) + 16.66 \cdot \mathbb{I}_{\mbox{Ocn}}(x) + 15.96 \cdot \mathbb{I}_{\mbox{S.Am}}(x)
+\end{align}
+
+
+So taking our equations above, if we were to take someone from Europe in 1952, 1982 and 2007 then their average life expectancy would be 63.4 years, 63.7 years and 69 years respectively. It is important to note here that the term for GDP per Capita isn't included in the regression equations above because the model estimate for that term in each of the years was given as very close to 0 and as such had no real impact on the equations.
+
+## Assessing Model Fit/ Assumptions 
+
+We can now move on to determining whether our model is an appropriate fit for the data by checking the 5 main assumptions that need to hold true. These are that the residuals have mean 0, are normally distributed and are independent, we also require that the scale of the variability of the residuals is constant at all values of the explanatory variables and that the values of the explanatory variables are recorded without error. Note that we are unable to assess the assumptions of the residuals being independent and that the values of the explanatory variables are recorded without error so assume these to be true.
+
+```{r reg.points, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+
+regression.points.1952 <- get_regression_points(step.model.1952)
+regression.points.1982 <- get_regression_points(step.model.1982)
+regression.points.2007 <- get_regression_points(step.model.2007)
+
+
+```
+
+We first plot the residuals against the explanatory variable GDP per Capita by Continent in Figure \ref{fig:plots4} below to assess the first assumption of the residuals having mean 0. From the plots we can see that the residuals do appear to be randomly scattered above and below the zero line for each of the years and as such can say this assumption holds.
+
+
+```{r reg.plots, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.cap="\\label{fig:plots4} Residuals against GDP/Cap by continent for 1952(Top L), 1982(Top R), 2007(Bottom)", fig.align='center', fig.pos="H"}
+
+
+p7 <- 
+  ggplot(regression.points.1952, aes(x = GDP.Cap, y = residual)) +
+  geom_point() +
+  labs(x = "GDP/Cap", y = "Residual") +
+  geom_hline(yintercept = 0, col = "blue", size = 1) +
+  facet_wrap(~Continent)
+
+p8 <- 
+  ggplot(regression.points.1982, aes(x = GDP.Cap, y = residual)) +
+  geom_point() +
+  labs(x = "GDP/Cap", y = "Residual") +
+  geom_hline(yintercept = 0, col = "blue", size = 1) +
+  facet_wrap(~Continent)
+
+p9 <- 
+  ggplot(regression.points.2007, aes(x = GDP.Cap, y = residual)) +
+  geom_point() +
+  labs(x = "GDP/Cap", y = "Residual") +
+  geom_hline(yintercept = 0, col = "blue", size = 1) +
+  facet_wrap(~Continent)
+
+grid.arrange(p7, p8, p9, layout_matrix = matrix(c(1, 3, 2, 3), nrow = 2))
+
+```
+
+We next use the plots below in Figure \ref{fig:plots5} of the residuals against the fitted values from each of the models to assess the assumption of constant variance. As we can see, it would be fair to say this would hold for the year 1952 but it becomes slightly more dubious as we move to 1982 and 2007 which is what we'd expect given the inequalities that have emerged over time between developing and developed nations within the continents.
+
+
+```{r reg.plots2, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.cap="\\label{fig:plots5} Residuals against fitted values by continent for 1952(Top L), 1982(Top R), 2007(Bottom)", fig.align='center', fig.pos="H", out.width="80%"}
+
+
+p10 <- 
+  ggplot(regression.points.1952, aes(x = LifeExp_hat, y = residual)) +
+  geom_point() +
+  labs(x = "Fitted Values", y = "Residual") +
+  geom_hline(yintercept = 0, col = "blue", size = 1) +
+  facet_wrap(~Continent)
+
+p11 <- 
+  ggplot(regression.points.1982, aes(x = LifeExp_hat, y = residual)) +
+  geom_point() +
+  labs(x = "Fitted Values", y = "Residual") +
+  geom_hline(yintercept = 0, col = "blue", size = 1) +
+  facet_wrap(~Continent)
+
+p12 <- 
+  ggplot(regression.points.2007, aes(x = LifeExp_hat, y = residual)) +
+  geom_point() +
+  labs(x = "Fitted Values", y = "Residual") +
+  geom_hline(yintercept = 0, col = "blue", size = 1) +
+  facet_wrap(~Continent)
+
+grid.arrange(p10, p11, p12, layout_matrix = matrix(c(1, 3, 2, 3), nrow = 2))
+
+```
+
+We now lastly move on to assess whether the residuals are normally distributed and we do so by examining histograms of the residuals below in Figure \ref{fig:plots6},
+
+```{r reg.plots3, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.cap="\\label{fig:plots6}Histograms of the Residuals for 1952(Top L), 1982(Top R), 2007(Bottom)", fig.align='center', fig.pos="H", out.width="80%"}
+
+
+p13 <- 
+  ggplot(regression.points.1952, aes(x = residual)) +
+geom_histogram(binwidth = 2, color = "white") +
+labs(x = "Residual")
+
+p14 <- 
+  ggplot(regression.points.1982, aes(x = residual)) +
+geom_histogram(binwidth = 2, color = "white") +
+labs(x = "Residual")
+
+p15 <- 
+  ggplot(regression.points.2007, aes(x = residual)) +
+geom_histogram(binwidth = 2, color = "white") +
+labs(x = "Residual")
+
+grid.arrange(p13, p14, p15, layout_matrix = matrix(c(1, 3, 2, 3), nrow = 2))
+
+```
+
+From Figure \ref{fig:plots6} above we see that for each of the years, the histogram of the residuals appears to be roughly symmetrical and bell-shaped suggesting we do indeed have normally distributed residuals. There does appear to be some outlying values at the extremes but nothing significant and there is no extreme skew for any of the years either.
+
+# Conclusion {#sec:conc}
+
+Overall, it appears this analysis has backed-up the logical way of thinking when it comes to life expectancy around the world in that as time progresses one would likely believe that the average life expectancy of humans would increase due to medical, technological and dietary advancements that humans have made over decades and centuries and from examining the 3 years 1952, 1982 and 2007 we can see that this seems to be the case. Despite this however, the issue of health inequalities arises across the world with these advancements as some continents become more and more well-off, others are left behind and the gap is only likely to increase as we have seen here with comparing Africa in particular to the other four continents. Imporvements could be made to this analysis in the future by taking into account socio-economic factors such as education and income to really assess how inequalities are developing across the globe instead of only looking at factors such as life expectancy, population and GDP per Capita
